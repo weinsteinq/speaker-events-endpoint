@@ -1,6 +1,30 @@
-export default async function handler(req, res) {
+// api/events.js  — Vercel Serverless Function (Node.js)
+// Handles CORS (OPTIONS), simple health check (GET), and your form submit (POST).
+
+function setCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*'); // or restrict to your domain
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
+
+module.exports = async function handler(req, res) {
   try {
-    if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method_not_allowed' });
+    setCors(res);
+
+    // 1) Preflight from browsers
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
+
+    // 2) Simple health check: GET /api/events
+    if (req.method === 'GET') {
+      return res.status(200).json({ ok: true, service: 'events-endpoint' });
+    }
+
+    // 3) Main submit: POST /api/events
+    if (req.method !== 'POST') {
+      return res.status(405).json({ ok: false, error: 'method_not_allowed' });
+    }
 
     const body = req.body || {};
     const SECRET = process.env.EVENTS_WEBHOOK_SECRET;
@@ -10,14 +34,14 @@ export default async function handler(req, res) {
     if (!SECRET || !FORM_ACTION_URL || !ENTRY_MAP_JSON) {
       return res.status(500).json({ ok: false, error: 'missing_env_vars' });
     }
-    if (body.secret !== SECRET) return res.status(401).json({ ok: false, error: 'unauthorized' });
-
+    if (body.secret !== SECRET) {
+      return res.status(401).json({ ok: false, error: 'unauthorized' });
+    }
     if (!body['Application Link']) {
       return res.status(400).json({ ok: false, error: 'missing_application_link' });
     }
 
-    const ENTRY_MAP = JSON.parse(ENTRY_MAP_JSON); // { "Header": "entry.123..." } OR { "Header": {"year":"entry.x","month":"entry.y","day":"entry.z"} }
-
+    const ENTRY_MAP = JSON.parse(ENTRY_MAP_JSON); // { "Header": "entry.123..." } or { "Header": {year,month,day} }
     const form = new URLSearchParams();
 
     // helper: split "YYYY-MM-DD" or "MM/DD/YYYY" into year/month/day
@@ -27,8 +51,7 @@ export default async function handler(req, res) {
       if (iso) return { year: iso[1], month: String(Number(iso[2])), day: String(Number(iso[3])) };
       const us = String(input).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
       if (us) return { year: us[3], month: String(Number(us[1])), day: String(Number(us[2])) };
-      // fallback: send whole string as month (Forms sometimes coerces)
-      return { month: String(input) };
+      return { month: String(input) }; // fallback: let Forms coerce
     };
 
     // Build form payload from your mapping
@@ -37,10 +60,8 @@ export default async function handler(req, res) {
       if (!entryDef) continue;
 
       if (typeof entryDef === 'string') {
-        // simple field
         form.set(entryDef, value);
       } else if (entryDef && typeof entryDef === 'object') {
-        // date group: {year, month, day}
         const { year, month, day } = splitDate(value);
         if (entryDef.year && year) form.set(entryDef.year, year);
         if (entryDef.month && month) form.set(entryDef.month, month);
@@ -48,20 +69,20 @@ export default async function handler(req, res) {
       }
     }
 
-    // prevent redirect loop requirements
+    // required extras to avoid redirect loop
     form.set('fvv', '1');
     form.set('partialResponse', '[]');
     form.set('pageHistory', '0');
 
-    const resp = await fetch(FORM_ACTION_URL, {
+    const response = await fetch(FORM_ACTION_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
       body: form.toString(),
     });
 
-    if (!resp.ok) {
-      const text = await resp.text();
-      return res.status(502).json({ ok: false, error: 'form_submit_failed', status: resp.status, text });
+    if (!response.ok) {
+      const text = await response.text();
+      return res.status(502).json({ ok: false, error: 'form_submit_failed', status: response.status, text });
     }
 
     return res.status(200).json({ ok: true, submitted: true });
@@ -69,4 +90,5 @@ export default async function handler(req, res) {
     console.error(err);
     return res.status(500).json({ ok: false, error: 'server_error', detail: err?.message });
   }
-}
+};
+
