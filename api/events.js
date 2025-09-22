@@ -33,9 +33,14 @@ module.exports = async function handler(req, res) {
       return res.status(500).json({ ok: false, error: 'missing_env_vars' });
     }
 
-    // ---------- DEBUG (remove after testing) ----------
-    console.log('body.secret =', JSON.stringify(body.secret), 'ENV =', JSON.stringify(SECRET));
-    // --------------------------------------------------
+    // ---------- DEEP DEBUG (remove after fix) ----------
+    const toHex = str => Buffer.from(str || '', 'utf8').toString('hex');
+    console.log(
+      'body.secret len=', (body.secret || '').length,
+      'env len=', (SECRET || '').length
+    );
+    console.log('body.secret hex=', toHex(body.secret), 'env hex=', toHex(SECRET));
+    // ---------------------------------------------------
 
     if (body.secret !== SECRET) {
       return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -94,4 +99,3 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ ok: false, error: 'server_error', detail: err?.message });
   }
 };
-
