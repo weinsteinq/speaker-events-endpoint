@@ -1,8 +1,8 @@
-// api/events.js  — Vercel Serverless Function (Node.js)
-// Handles CORS (OPTIONS), simple health check (GET), and your form submit (POST).
+// api/events.js — Vercel Serverless Function (Node.js)
+// Handles CORS (OPTIONS), health check (GET), and form submit (POST).
 
 function setCors(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*'); // or restrict to your domain
+  res.setHeader('Access-Control-Allow-Origin', '*'); // tighten later if desired
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
@@ -11,17 +11,15 @@ module.exports = async function handler(req, res) {
   try {
     setCors(res);
 
-    // 1) Preflight from browsers
-    if (req.method === 'OPTIONS') {
-      return res.status(200).end();
-    }
+    // 1) Pre-flight
+    if (req.method === 'OPTIONS') return res.status(200).end();
 
-    // 2) Simple health check: GET /api/events
+    // 2) Health check
     if (req.method === 'GET') {
       return res.status(200).json({ ok: true, service: 'events-endpoint' });
     }
 
-    // 3) Main submit: POST /api/events
+    // 3) Submit
     if (req.method !== 'POST') {
       return res.status(405).json({ ok: false, error: 'method_not_allowed' });
     }
@@ -34,6 +32,11 @@ module.exports = async function handler(req, res) {
     if (!SECRET || !FORM_ACTION_URL || !ENTRY_MAP_JSON) {
       return res.status(500).json({ ok: false, error: 'missing_env_vars' });
     }
+
+    // ---------- DEBUG (remove after testing) ----------
+    console.log('body.secret =', JSON.stringify(body.secret), 'ENV =', JSON.stringify(SECRET));
+    // --------------------------------------------------
+
     if (body.secret !== SECRET) {
       return res.status(401).json({ ok: false, error: 'unauthorized' });
     }
@@ -41,27 +44,27 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ ok: false, error: 'missing_application_link' });
     }
 
-    const ENTRY_MAP = JSON.parse(ENTRY_MAP_JSON); // { "Header": "entry.123..." } or { "Header": {year,month,day} }
+    const ENTRY_MAP = JSON.parse(ENTRY_MAP_JSON);
     const form = new URLSearchParams();
 
-    // helper: split "YYYY-MM-DD" or "MM/DD/YYYY" into year/month/day
+    // helper: split "YYYY-MM-DD" or "MM/DD/YYYY"
     const splitDate = (input) => {
       if (!input) return {};
       const iso = String(input).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
       if (iso) return { year: iso[1], month: String(Number(iso[2])), day: String(Number(iso[3])) };
       const us = String(input).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
       if (us) return { year: us[3], month: String(Number(us[1])), day: String(Number(us[2])) };
-      return { month: String(input) }; // fallback: let Forms coerce
+      return { month: String(input) };
     };
 
-    // Build form payload from your mapping
+    // Build Google-Form payload
     for (const [label, entryDef] of Object.entries(ENTRY_MAP)) {
       const value = body[label] ?? '';
       if (!entryDef) continue;
 
       if (typeof entryDef === 'string') {
         form.set(entryDef, value);
-      } else if (entryDef && typeof entryDef === 'object') {
+      } else if (typeof entryDef === 'object') {
         const { year, month, day } = splitDate(value);
         if (entryDef.year && year) form.set(entryDef.year, year);
         if (entryDef.month && month) form.set(entryDef.month, month);
@@ -69,7 +72,7 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // required extras to avoid redirect loop
+    // Required extras
     form.set('fvv', '1');
     form.set('partialResponse', '[]');
     form.set('pageHistory', '0');
